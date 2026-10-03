@@ -1,0 +1,194 @@
+name: Build Arch package aarch64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo apt clean
+          df -h
+
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+
+      - name: Install host dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            wget \
+            arch-install-scripts
+
+
+      - name: Download Arch Linux ARM rootfs
+        run: |
+          wget -O ArchLinuxARM-aarch64.tar.gz \
+            http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+
+          sudo mkdir -p /arch
+
+          sudo tar \
+            --exclude='./var/cache/pacman/pkg/*' \
+            -xpf ArchLinuxARM-aarch64.tar.gz \
+            -C /arch
+
+          df -h
+
+
+      - name: Prepare chroot
+        run: |
+          sudo cp /etc/resolv.conf /arch/etc/resolv.conf
+
+          # arch-chroot需要target是mount point
+          sudo mount --bind /arch /arch
+
+          df -h /arch
+
+
+      - name: Prepare Arch Linux ARM
+        run: |
+          sudo arch-chroot /arch /bin/bash <<'EOF'
+
+          set -e
+
+          pacman-key --init
+          pacman-key --populate archlinuxarm
+
+          pacman -Sy --noconfirm
+
+          pacman -S --needed --noconfirm \
+            base-devel \
+            sudo \
+            git
+
+
+          sed -Ei \
+          "s/^#?(MAKEFLAGS=).*$/\1\"-j$(nproc)\"/;
+           /^OPTIONS=/ s/debug //;
+           s|^PKGEXT=.*|PKGEXT='.pkg.tar.zst'|" \
+           /etc/makepkg.conf
+
+
+          grep -E \
+          "MAKEFLAGS|PKGEXT|OPTIONS" \
+          /etc/makepkg.conf
+
+
+          rm -rf /var/cache/pacman/pkg/*
+
+          EOF
+
+
+      - name: Create build user
+        run: |
+          sudo arch-chroot /arch /bin/bash <<'EOF'
+
+          set -e
+
+          useradd -m builder
+
+
+          echo \
+          "builder ALL=(ALL) NOPASSWD: ALL" \
+          > /etc/sudoers.d/builder
+
+
+          chmod 440 /etc/sudoers.d/builder
+
+
+          EOF
+
+
+      - name: Copy source into Arch ARM
+        run: |
+          sudo mkdir -p /arch/build
+
+          sudo cp -r . /arch/build/
+
+
+          # builder只存在于Arch ARM中
+          sudo arch-chroot /arch /bin/bash <<'EOF'
+
+          chown -R builder:builder /build
+
+          EOF
+
+
+      - name: Check environment
+        run: |
+          sudo arch-chroot /arch /bin/bash <<'EOF'
+
+          uname -m
+
+          id builder
+
+          ls -la /build
+
+          EOF
+
+
+      - name: Clean before build
+        run: |
+          sudo rm -rf /arch/var/cache/pacman/pkg/*
+
+          df -h
+
+
+      - name: Build package
+        run: |
+          sudo arch-chroot /arch /bin/bash <<'EOF'
+
+          set -e
+
+          cd /build
+
+
+          su builder -c "
+            makepkg \
+            --syncdeps \
+            --noconfirm
+          "
+
+
+          EOF
+
+
+      - name: Show result
+        run: |
+          sudo find /arch/build \
+            -name "*.pkg.tar.zst"
+
+
+      - name: Collect package
+        run: |
+          mkdir output
+
+          sudo cp \
+            /arch/build/*.pkg.tar.zst \
+            output/
+
+
+          sudo chown -R $USER:$USER output
+
+
+      - name: Upload package
+        uses: actions/upload-artifact@v6
+        with:
+          name: telegram-desktop-aarch64
+          path: output/*.pkg.tar.zst
+
+
+      - name: Cleanup mounts
+        if: always()
+        run: |
+          sudo umount -R /arch || true
