@@ -48,6 +48,7 @@ depends=(
   'qt6-wayland'
   'rnnoise'
   'tlottie'
+  'webkitgtk-6.0'
   'xxhash'
   'zlib'
 )
