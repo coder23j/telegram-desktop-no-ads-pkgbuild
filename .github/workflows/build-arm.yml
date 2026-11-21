@@ -79,6 +79,10 @@ jobs:
             sudo \
             git
 
+          # 清掉升级/安装下载的包缓存，避免额外占用 200~400MB 磁盘
+          pacman -Sc --noconfirm
+          rm -rf /var/cache/pacman/pkg/*
+
 
           sed -Ei \
           "s/^#?(MAKEFLAGS=).*$/\1\"-j$(nproc)\"/;
