@@ -64,7 +64,15 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinuxarm
 
-          pacman -Sy --noconfirm
+          # 必须是完整升级 (-Syu) 而非仅同步数据库 (-Sy)。
+          # 仅 -Sy 会造成部分升级(pyg partial upgrade):
+          # rootfs 里旧的 libexpat 与新装的 python 的 pyexpat 符号不匹配,
+          # 运行 gdbus-codegen 时报
+          #   ImportError: pyexpat... undefined symbol: XML_GetCurrentByteIndex64
+          pacman -Syu --noconfirm
+
+          # 确认 expat 与其运行时符号一致
+          pacman -S --needed --noconfirm expat
 
           pacman -S --needed --noconfirm \
             base-devel \
@@ -131,6 +139,9 @@ jobs:
           uname -m
 
           id builder
+
+          # 提前暴露 expat/pyexpat 不一致问题，而不是等构建到 gdbus-codegen 才失败
+          python -c "import pyexpat, sys; print(sys.version); print(pyexpat.EXPAT_VERSION)"
 
           ls -la /build
 
